@@ -7,7 +7,8 @@ The built-in cover dialog shows two unrelated sliders, and most cover cards igno
 
 ## Features
 
-- Drag the window to set the height, drag the side profile of the slats to set the angle (in degrees).
+- Drag the window to set the height; grab the handle at the tip of the slat (side view) and turn it to set the angle. The state is shown in words – open, tilted, closed – and in degrees.
+- The window shows what you will see: open slats let the view through, closed slats form a wall.
 - Target preview: a dashed line and dashed slats show the target, the current state stays visible.
 - Height and angle can be adjusted together; the card sends after a short delay (`debounce`).
 - Presets: up, view (slats horizontal), shade, closed – or your own.

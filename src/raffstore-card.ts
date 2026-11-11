@@ -1,4 +1,14 @@
-import { LitElement, html, svg, nothing, type PropertyValues, type TemplateResult } from "lit";
+import { LitElement, html, nothing, type PropertyValues } from "lit";
+import {
+  DIAL_H,
+  DIAL_W,
+  WIN_H,
+  WIN_W,
+  dialAngleAt,
+  loweredFromY,
+  renderDial,
+  renderWindow,
+} from "./drawing";
 import { localize, type StringKey } from "./localize";
 import { cardStyles } from "./styles";
 import type {
@@ -34,13 +44,7 @@ import {
 declare const __CARD_VERSION__: string;
 const CARD_VERSION = typeof __CARD_VERSION__ === "string" ? __CARD_VERSION__ : "dev";
 
-/* Window drawing geometry (SVG user units). */
-const WIN_W = 220;
-const WIN_H = 280;
-const SLAT_TOP = 36;
-const SLAT_SPAN = 232;
-const SLAT_PITCH = 12;
-const PROF_W = 120;
+let uidCounter = 0;
 
 const MDI_UP = "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z";
 const MDI_DOWN = "M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z";
@@ -75,7 +79,8 @@ export class RaffstoreCard extends LitElement {
   private _ticker?: number;
   private _pendingTilt?: PendingTilt;
   private _sentAt = 0;
-  private _profileDrag?: { y: number; angle: number };
+  private _dialDrag = false;
+  private _uid = `${++uidCounter}`;
 
   constructor() {
     super();
@@ -392,13 +397,12 @@ export class RaffstoreCard extends LitElement {
     this._setTarget(presetTarget(p, this._closedAngle, this._openAngle), true);
   }
 
-  private _svgY(ev: PointerEvent, el: Element, height: number): number {
+  private _svgPoint(ev: PointerEvent, el: Element, w: number, h: number): { x: number; y: number } {
     const r = el.getBoundingClientRect();
-    return ((ev.clientY - r.top) * height) / (r.height || 1);
-  }
-
-  private _loweredFromY(y: number): number {
-    return clamp(((y - SLAT_TOP) / SLAT_SPAN) * 100, 0, 100);
+    return {
+      x: ((ev.clientX - r.left) * w) / (r.width || 1),
+      y: ((ev.clientY - r.top) * h) / (r.height || 1),
+    };
   }
 
   private _winDown(ev: PointerEvent): void {
@@ -409,19 +413,27 @@ export class RaffstoreCard extends LitElement {
     this._sendTimer = undefined;
     this._dragging = true;
     const base = this._baseTarget();
-    this._target = {
-      position: loweredToPosition(this._loweredFromY(this._svgY(ev, el, WIN_H))),
-      tilt: base.tilt,
-    };
+    const { y } = this._svgPoint(ev, el, WIN_W, WIN_H);
+    this._target = { position: loweredToPosition(loweredFromY(y)), tilt: base.tilt };
   }
 
   private _winMove(ev: PointerEvent): void {
-    if (!this._dragging || this._profileDrag || !this._target) return;
-    const y = this._svgY(ev, ev.currentTarget as Element, WIN_H);
-    this._target = { ...this._target, position: loweredToPosition(this._loweredFromY(y)) };
+    if (!this._dragging || this._dialDrag || !this._target) return;
+    const { y } = this._svgPoint(ev, ev.currentTarget as Element, WIN_W, WIN_H);
+    this._target = { ...this._target, position: loweredToPosition(loweredFromY(y)) };
   }
 
-  private _profDown(ev: PointerEvent): void {
+  private _dialSet(ev: PointerEvent): void {
+    const { x, y } = this._svgPoint(ev, ev.currentTarget as Element, DIAL_W, DIAL_H);
+    const raw = dialAngleAt(x, y);
+    if (raw === undefined || !this._target) return;
+    const closed = this._closedAngle;
+    const open = this._openAngle;
+    const angle = clamp(raw, Math.min(closed, open), Math.max(closed, open));
+    this._target = { ...this._target, tilt: angleToTilt(angle, closed, open) };
+  }
+
+  private _dialDown(ev: PointerEvent): void {
     const st = this._primary();
     if (isUnavailable(st) || !supports(st, FEATURE_SET_TILT_POSITION)) return;
     const el = ev.currentTarget as Element;
@@ -429,32 +441,20 @@ export class RaffstoreCard extends LitElement {
     window.clearTimeout(this._sendTimer);
     this._sendTimer = undefined;
     this._dragging = true;
-    const base = this._baseTarget();
-    this._target = base;
-    this._profileDrag = {
-      y: this._svgY(ev, el, WIN_H),
-      angle: tiltToAngle(base.tilt, this._closedAngle, this._openAngle),
-    };
+    this._dialDrag = true;
+    this._target = this._baseTarget();
+    this._dialSet(ev);
   }
 
-  private _profMove(ev: PointerEvent): void {
-    if (!this._profileDrag || !this._target) return;
-    const closed = this._closedAngle;
-    const open = this._openAngle;
-    const dir = closed >= open ? 1 : -1;
-    const dy = this._svgY(ev, ev.currentTarget as Element, WIN_H) - this._profileDrag.y;
-    const angle = clamp(
-      this._profileDrag.angle + dy * 0.6 * dir,
-      Math.min(closed, open),
-      Math.max(closed, open),
-    );
-    this._target = { ...this._target, tilt: angleToTilt(angle, closed, open) };
+  private _dialMove(ev: PointerEvent): void {
+    if (!this._dialDrag) return;
+    this._dialSet(ev);
   }
 
   private _up(): void {
     if (!this._dragging) return;
     this._dragging = false;
-    this._profileDrag = undefined;
+    this._dialDrag = false;
     if (this._target) this._setTarget(this._target);
   }
 
@@ -470,15 +470,17 @@ export class RaffstoreCard extends LitElement {
     this._setTarget({ ...base, position: loweredToPosition(clamp(lowered, 0, 100)) });
   }
 
-  private _profKey(ev: KeyboardEvent): void {
+  private _dialKey(ev: KeyboardEvent): void {
     if (!supports(this._primary(), FEATURE_SET_TILT_POSITION)) return;
     const closed = this._closedAngle;
     const open = this._openAngle;
-    const dir = closed >= open ? 1 : -1;
+    const toClosed = closed >= open ? 1 : -1;
     const base = this._baseTarget();
     let angle = tiltToAngle(base.tilt, closed, open);
-    if (ev.key === "ArrowDown") angle += 5 * dir;
-    else if (ev.key === "ArrowUp") angle -= 5 * dir;
+    if (ev.key === "ArrowDown" || ev.key === "ArrowRight") angle += 5 * toClosed;
+    else if (ev.key === "ArrowUp" || ev.key === "ArrowLeft") angle -= 5 * toClosed;
+    else if (ev.key === "Home") angle = open;
+    else if (ev.key === "End") angle = closed;
     else return;
     ev.preventDefault();
     angle = clamp(angle, Math.min(closed, open), Math.max(closed, open));
@@ -506,59 +508,21 @@ export class RaffstoreCard extends LitElement {
     ];
   }
 
-  private _yOf(lowered: number): number {
-    return SLAT_TOP + (lowered / 100) * SLAT_SPAN;
+  private _presetActive(p: PresetConfig, st: HassEntity, hasTilt: boolean): boolean {
+    if (isMoving(st) || this._target) return false;
+    const t = presetTarget(p, this._closedAngle, this._openAngle);
+    if (Math.abs(currentPosition(st) - t.position) > 1) return false;
+    if (t.position >= 100 || !hasTilt) return true;
+    return Math.abs(currentTilt(st) - t.tilt) <= 3;
   }
 
-  private _renderWindow(lowered: number, angle: number, targetLowered: number | undefined, hasTilt: boolean) {
-    const yb = this._yOf(lowered);
-    const thick = hasTilt ? 2 + 10 * Math.abs(Math.sin((angle * Math.PI) / 180)) : 6;
-    const slats: TemplateResult[] = [];
-    for (let y = SLAT_TOP + 2; y < yb - 4; y += SLAT_PITCH) {
-      slats.push(
-        svg`<rect x="12" y=${(y - thick / 2).toFixed(1)} width="196" height=${thick.toFixed(1)} style="fill:var(--rc-slat)"></rect>`,
-      );
-    }
-    const ghost =
-      targetLowered !== undefined && Math.abs(targetLowered - lowered) > 0.5
-        ? svg`<line x1="10" x2="210" y1=${this._yOf(targetLowered)} y2=${this._yOf(targetLowered)}
-            style="stroke:var(--rc-target)" stroke-width="2.5" stroke-dasharray="7 5"></line>`
-        : nothing;
-    return svg`
-      <rect x="10" y="30" width="200" height="244" rx="3" style="fill:var(--rc-glass)"></rect>
-      <rect x="10" y="226" width="200" height="48" style="fill:var(--rc-ground)"></rect>
-      ${slats}
-      <rect x="10" y=${Math.max(30, yb - 4).toFixed(1)} width="200" height="7" rx="2" style="fill:var(--rc-rail)"></rect>
-      ${ghost}
-      <rect x="4" y="8" width="212" height="24" rx="4" style="fill:var(--rc-box)"></rect>
-      <rect x="10" y="30" width="200" height="244" rx="3" fill="none" style="stroke:var(--rc-slat)" stroke-width="2"></rect>
-    `;
-  }
-
-  private _renderProfile(angle: number, targetAngle: number | undefined) {
-    const line = (a: number, y: number, ghost: boolean) => {
-      const r = (a * Math.PI) / 180;
-      const dx = 22 * Math.cos(r);
-      const dy = 22 * Math.sin(r);
-      return ghost
-        ? svg`<line x1=${(60 - dx).toFixed(1)} y1=${(y - dy).toFixed(1)} x2=${(60 + dx).toFixed(1)} y2=${(y + dy).toFixed(1)}
-            style="stroke:var(--rc-target)" stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round"></line>`
-        : svg`<line x1=${(60 - dx).toFixed(1)} y1=${(y - dy).toFixed(1)} x2=${(60 + dx).toFixed(1)} y2=${(y + dy).toFixed(1)}
-            style="stroke:var(--rc-rail)" stroke-width="5" stroke-linecap="round"></line>`;
-    };
-    const showGhost = targetAngle !== undefined && Math.abs(targetAngle - angle) > 1;
-    const rows: TemplateResult[] = [];
-    for (let k = 0; k < 6; k++) {
-      const y = 56 + k * 38;
-      rows.push(line(angle, y, false));
-      if (showGhost) rows.push(line(targetAngle!, y, true));
-    }
-    return svg`
-      <text x="4" y="20" font-size="12" style="fill:var(--secondary-text-color)">${this._t("inside")}</text>
-      <text x=${PROF_W - 4} y="20" font-size="12" text-anchor="end" style="fill:var(--secondary-text-color)">${this._t("outside")}</text>
-      <line x1="60" y1="32" x2="60" y2="272" style="stroke:var(--rc-box)" stroke-width="1" stroke-dasharray="2 4"></line>
-      ${rows}
-    `;
+  private _slatWord(angle: number): string {
+    const closed = this._closedAngle;
+    const open = this._openAngle;
+    const f = open === closed ? 1 : (angle - open) / (closed - open);
+    if (f <= 0.12) return this._t("slats_open");
+    if (f >= 0.88) return this._t("slats_closed");
+    return this._t("slats_tilted");
   }
 
   protected render() {
@@ -581,36 +545,38 @@ export class RaffstoreCard extends LitElement {
     const tAngle = target ? tiltToAngle(target.tilt, closed, open) : undefined;
     const posPending = tLowered !== undefined && Math.abs(tLowered - lowered) > 0.5;
     const anglePending = hasTilt && tAngle !== undefined && Math.abs(tAngle - angle) > 1;
+    const shownLowered = posPending ? tLowered! : lowered;
+    const shownAngle = anglePending ? tAngle! : angle;
 
     const locked = this._locked();
-    let stateText = unavailable
+    const stateText = unavailable
       ? this._t("unavailable")
       : st.state === "opening"
         ? this._t("opening")
         : st.state === "closing"
           ? this._t("closing")
           : this._t("stopped");
-    if (locked !== undefined) {
-      stateText += ` · ${locked ? this._t("auto_paused") : this._t("automation")}`;
-    }
 
     const name =
       this._config.name ??
-      (this._entities.length === 1 || this._selected >= 0
-        ? this._entityName(this._entities[Math.max(0, this._selected)])
-        : this._entityName(this._entities[0]));
+      this._entityName(this._entities[Math.max(0, this._selected)] ?? this._entities[0]);
     const canStop = supports(st, FEATURE_STOP);
+    const moving = isMoving(st);
 
     return html`
       <ha-card>
         <div class="header">
           <div class="titles">
             <div class="title">${name}</div>
-            <div class="state">${stateText}</div>
+            <div class="state ${moving ? "moving" : ""}">${stateText}</div>
           </div>
           ${locked !== undefined
-            ? html`<button class="pill ${locked ? "" : "auto"}" @click=${this._toggleLock}>
-                ${locked ? this._t("manual") : this._t("auto")}
+            ? html`<button
+                class="pill ${locked ? "manual" : "auto"}"
+                title=${locked ? this._t("auto_paused") : this._t("automation")}
+                @click=${this._toggleLock}
+              >
+                <span class="dot"></span>${locked ? this._t("manual") : this._t("auto")}
               </button>`
             : nothing}
         </div>
@@ -639,61 +605,74 @@ export class RaffstoreCard extends LitElement {
           : nothing}
 
         <div class="visual">
-          <div>
+          <div class="col">
             <svg
-              class="ctl ${unavailable ? "disabled" : ""}"
+              class="ctl win ${unavailable ? "disabled" : ""}"
               viewBox="0 0 ${WIN_W} ${WIN_H}"
               role="slider"
               tabindex="0"
               aria-label=${this._t("height_label")}
               aria-valuemin="0"
               aria-valuemax="100"
-              aria-valuenow=${round(tLowered ?? lowered)}
-              aria-valuetext="${round(tLowered ?? lowered)} %"
+              aria-valuenow=${round(shownLowered)}
+              aria-valuetext="${round(shownLowered)} %"
               @pointerdown=${this._winDown}
               @pointermove=${this._winMove}
               @pointerup=${this._up}
               @pointercancel=${this._up}
               @keydown=${this._winKey}
             >
-              ${this._renderWindow(lowered, angle, tLowered, hasTilt)}
+              ${renderWindow({
+                lowered,
+                angle,
+                hasTilt,
+                targetLowered: tLowered,
+                uid: this._uid,
+              })}
             </svg>
             <div class="readout">
-              <div class="label">${this._t("lowered")}</div>
-              <div class="value ${posPending ? "pending" : ""}">${round(posPending ? tLowered! : lowered)} %</div>
-              <div class="now">${posPending ? `${this._t("now")} ${round(lowered)} %` : ""}</div>
+              <span class="value ${posPending ? "pending" : ""}">${round(shownLowered)}<small>%</small></span>
+              <span class="label">${this._t("lowered")}</span>
             </div>
+            <div class="now">${posPending ? `${this._t("now")} ${round(lowered)} %` : ""}</div>
           </div>
-          <div>
+          <div class="col">
             <svg
-              class="ctl ${unavailable || !hasTilt ? "disabled" : ""}"
-              viewBox="0 0 ${PROF_W} ${WIN_H}"
+              class="ctl dial ${unavailable || !hasTilt ? "disabled" : ""}"
+              viewBox="0 0 ${DIAL_W} ${DIAL_H}"
               role="slider"
               tabindex=${hasTilt ? "0" : "-1"}
               aria-label=${this._t("angle_label")}
               aria-valuemin=${Math.min(closed, open)}
               aria-valuemax=${Math.max(closed, open)}
-              aria-valuenow=${round(tAngle ?? angle)}
-              aria-valuetext="${round(tAngle ?? angle)}°"
-              @pointerdown=${this._profDown}
-              @pointermove=${this._profMove}
+              aria-valuenow=${round(shownAngle)}
+              aria-valuetext="${this._slatWord(shownAngle)} ${round(shownAngle)}°"
+              @pointerdown=${this._dialDown}
+              @pointermove=${this._dialMove}
               @pointerup=${this._up}
               @pointercancel=${this._up}
-              @keydown=${this._profKey}
+              @keydown=${this._dialKey}
             >
-              ${this._renderProfile(hasTilt ? angle : closed, hasTilt ? tAngle : undefined)}
+              ${renderDial({
+                angle: hasTilt ? angle : closed,
+                minAngle: Math.min(closed, open),
+                maxAngle: Math.max(closed, open),
+                closedAngle: closed,
+                targetAngle: hasTilt ? tAngle : undefined,
+                enabled: hasTilt && !unavailable,
+                insideLabel: this._t("inside"),
+                outsideLabel: this._t("outside"),
+              })}
             </svg>
             <div class="readout">
-              <div class="label">${this._t("slats")}</div>
-              <div class="value ${anglePending ? "pending" : ""}">
-                ${hasTilt ? `${round(anglePending ? tAngle! : angle)}°` : "–"}
-              </div>
-              <div class="now">${anglePending ? `${this._t("now")} ${round(angle)}°` : ""}</div>
+              <span class="value ${anglePending ? "pending" : ""}">${hasTilt ? round(shownAngle) : "–"}<small>${hasTilt ? "°" : ""}</small></span>
+              <span class="label">${hasTilt ? this._slatWord(shownAngle) : this._t("slats")}</span>
             </div>
+            <div class="now">${anglePending ? `${this._t("now")} ${round(angle)}°` : ""}</div>
           </div>
         </div>
 
-        ${this._renderPresets(hasTilt, unavailable)}
+        ${this._renderPresets(st, hasTilt, unavailable)}
 
         <div class="controls">
           <button aria-label=${this._t("raise")} title=${this._t("raise")} ?disabled=${unavailable}
@@ -710,20 +689,26 @@ export class RaffstoreCard extends LitElement {
           </button>
         </div>
 
-        ${!hasTilt && !unavailable ? html`<div class="note warning">${this._t("no_tilt")}</div>` : nothing}
+        ${!hasTilt && !unavailable ? html`<div class="note">${this._t("no_tilt")}</div>` : nothing}
       </ha-card>
     `;
   }
 
-  private _renderPresets(hasTilt: boolean, unavailable: boolean) {
+  private _renderPresets(st: HassEntity, hasTilt: boolean, unavailable: boolean) {
     const presets = this._presets(hasTilt);
     if (!presets.length) return nothing;
     return html`<div class="presets" style="--rc-n: ${presets.length}">
-      ${presets.map(
-        (p) => html`<button ?disabled=${unavailable} @click=${() => this._applyPreset(p)}>
+      ${presets.map((p) => {
+        const active = !unavailable && this._presetActive(p, st, hasTilt);
+        return html`<button
+          class=${active ? "on" : ""}
+          aria-pressed=${active}
+          ?disabled=${unavailable}
+          @click=${() => this._applyPreset(p)}
+        >
           ${p.icon ? html`<ha-icon .icon=${p.icon}></ha-icon>` : nothing}${p.name}
-        </button>`,
-      )}
+        </button>`;
+      })}
     </div>`;
   }
 
