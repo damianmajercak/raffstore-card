@@ -41,6 +41,9 @@ export interface PresetConfig {
  */
 export type TiltMode = "after_move" | "immediate";
 
+/** Cross-section of the slats shown in the angle dial. */
+export type SlatProfile = "z" | "c" | "flat";
+
 export interface RaffstoreCardConfig {
   type: string;
   entity?: string;
@@ -48,6 +51,7 @@ export interface RaffstoreCardConfig {
   name?: string;
   lock_entity?: string;
   tilt_mode?: TiltMode;
+  slat_profile?: SlatProfile;
   tilt_closed_angle?: number;
   tilt_open_angle?: number;
   presets?: PresetConfig[] | false;

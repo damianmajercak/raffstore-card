@@ -1,4 +1,5 @@
 import { svg, nothing, type TemplateResult } from "lit";
+import type { SlatProfile } from "./types";
 
 /*
  * SVG illustrations of the card. All colours come from CSS custom properties
@@ -95,11 +96,29 @@ function arcPath(from: number, to: number, r: number): string {
   return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${r} ${r} 0 ${large} ${sweep} ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
 }
 
-/** A C-shaped raffstore slat, centred on the pivot, horizontal before rotation. */
-function slatShape(cy: number, angle: number, cls: string): TemplateResult {
+
+
+/** Slat cross-section, centred on the pivot, horizontal before rotation (inside left, outside right). */
+function slatPath(cy: number, profile: SlatProfile): string {
+  const x0 = PIVOT.x;
   const L = SLAT_HALF;
+  switch (profile) {
+    case "c":
+      return `M ${x0 - L} ${cy + 1.5} Q ${x0} ${cy - 8} ${x0 + L} ${cy + 1.5}`;
+    case "flat":
+      return `M ${x0 - L} ${cy} L ${x0 + L} ${cy}`;
+    default: {
+      /* Z profile: flat web, inner edge folded up, outer edge folded down; neighbours interlock when closed. */
+      const lip = 6;
+      const bend = 5;
+      return `M ${x0 - L} ${cy - lip} L ${x0 - L + bend} ${cy} L ${x0 + L - bend} ${cy} L ${x0 + L} ${cy + lip}`;
+    }
+  }
+}
+
+function slatShape(cy: number, angle: number, cls: string, profile: SlatProfile): TemplateResult {
   return svg`<g transform="rotate(${angle.toFixed(2)} ${PIVOT.x} ${cy})">
-    <path d="M ${PIVOT.x - L} ${cy + 1.5} Q ${PIVOT.x} ${cy - 8} ${PIVOT.x + L} ${cy + 1.5}" class="${cls}"></path>
+    <path d=${slatPath(cy, profile)} class="${cls}"></path>
   </g>`;
 }
 
@@ -113,6 +132,7 @@ export interface DialDrawing {
   enabled: boolean;
   insideLabel: string;
   outsideLabel: string;
+  profile: SlatProfile;
 }
 
 export function renderDial(d: DialDrawing): TemplateResult {
@@ -136,15 +156,15 @@ export function renderDial(d: DialDrawing): TemplateResult {
     <text x=${DIAL_W - 4} y="16" text-anchor="end" class="dial-side">${d.outsideLabel}</text>
     <circle cx="104" cy="34" r="7" class="sun"></circle>
     <line x1=${PIVOT.x} y1="30" x2=${PIVOT.x} y2="196" class="cord"></line>
-    ${slatShape(PIVOT.y - STACK, d.angle, "slat-ctx")}
-    ${slatShape(PIVOT.y + STACK, d.angle, "slat-ctx")}
+    ${slatShape(PIVOT.y - STACK, d.angle, "slat-ctx", d.profile)}
+    ${slatShape(PIVOT.y + STACK, d.angle, "slat-ctx", d.profile)}
     <path d=${arcPath(d.minAngle, d.maxAngle, ARC_R)} class="track"></path>
     ${d.enabled ? svg`<path d=${arcPath(openAngle, d.angle, ARC_R)} class="track-fill"></path>` : nothing}
     ${ticks}
     ${labelAt(d.minAngle, `${Math.round(d.minAngle)}°`)}
     ${labelAt(d.maxAngle, `${Math.round(d.maxAngle)}°`)}
-    ${showGhost ? slatShape(PIVOT.y, d.targetAngle!, "slat-ghost") : nothing}
-    ${slatShape(PIVOT.y, d.angle, "slat-main")}
+    ${showGhost ? slatShape(PIVOT.y, d.targetAngle!, "slat-ghost", d.profile) : nothing}
+    ${slatShape(PIVOT.y, d.angle, "slat-main", d.profile)}
     <circle cx=${PIVOT.x} cy=${PIVOT.y} r="3" class="pivot"></circle>
     ${gh ? svg`<circle cx=${gh.x.toFixed(2)} cy=${gh.y.toFixed(2)} r="7" class="handle-ghost"></circle>` : nothing}
     ${d.enabled

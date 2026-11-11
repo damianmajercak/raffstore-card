@@ -125,6 +125,7 @@ export class RaffstoreCard extends LitElement {
       name: t("editor_name"),
       lock_entity: t("editor_lock"),
       tilt_mode: t("editor_tilt_mode"),
+      slat_profile: t("editor_profile"),
       tilt_closed_angle: t("editor_closed_angle"),
       tilt_open_angle: t("editor_open_angle"),
       debounce: t("editor_debounce"),
@@ -149,6 +150,19 @@ export class RaffstoreCard extends LitElement {
               options: [
                 { value: "after_move", label: t("editor_after_move") },
                 { value: "immediate", label: t("editor_immediate") },
+              ],
+            },
+          },
+        },
+        {
+          name: "slat_profile",
+          selector: {
+            select: {
+              mode: "dropdown",
+              options: [
+                { value: "z", label: t("editor_profile_z") },
+                { value: "c", label: t("editor_profile_c") },
+                { value: "flat", label: t("editor_profile_flat") },
               ],
             },
           },
@@ -662,6 +676,7 @@ export class RaffstoreCard extends LitElement {
                 enabled: hasTilt && !unavailable,
                 insideLabel: this._t("inside"),
                 outsideLabel: this._t("outside"),
+                profile: this._config.slat_profile ?? "z",
               })}
             </svg>
             <div class="readout">

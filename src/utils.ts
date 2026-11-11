@@ -53,6 +53,9 @@ export function validateConfig(config: RaffstoreCardConfig): void {
   if (config.tilt_mode && !["after_move", "immediate"].includes(config.tilt_mode)) {
     throw new Error("tilt_mode must be after_move or immediate");
   }
+  if (config.slat_profile && !["z", "c", "flat"].includes(config.slat_profile)) {
+    throw new Error("slat_profile must be z, c or flat");
+  }
   if (config.presets) {
     if (!Array.isArray(config.presets)) throw new Error("presets must be a list");
     for (const p of config.presets) {

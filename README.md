@@ -5,6 +5,10 @@ Set the **height and the slat angle in one card**, visually: drag the window to 
 
 The built-in cover dialog shows two unrelated sliders, and most cover cards ignore tilt altogether. This card shows what the blind will actually look like before it moves.
 
+![Raffstore Card in the light theme – slats open with the view through them, and tilted to 45° for shade](docs/screenshot-light.png)
+
+![Raffstore Card in the dark theme](docs/screenshot-dark.png)
+
 ## Features
 
 - Drag the window to set the height; grab the handle at the tip of the slat (side view) and turn it to set the angle. The state is shown in words – open, tilted, closed – and in degrees.
@@ -69,6 +73,7 @@ presets:
 | `name` | friendly name | Card title. |
 | `lock_entity` | – | `switch` / `input_boolean`; `on` = automation paused. A manual move turns it on, the pill toggles it. |
 | `tilt_mode` | `after_move` | When the slat angle is sent, see below. |
+| `slat_profile` | `z` | Slat cross-section in the angle dial: `z` (e.g. Z90), `c` (e.g. C80) or `flat`. |
 | `tilt_closed_angle` | `90` | Slat angle in degrees at tilt position 0 % (closed). |
 | `tilt_open_angle` | `0` | Slat angle in degrees at tilt position 100 % (open, horizontal). |
 | `presets` | built-in | List of `{name, position, angle \| tilt, icon}`; `position` and `tilt` use Home Assistant percent (position 100 = raised, tilt 100 = open). `false` hides presets. |

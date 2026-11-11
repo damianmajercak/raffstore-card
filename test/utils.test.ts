@@ -54,6 +54,10 @@ describe("config", () => {
     expect(() => validateConfig({ type: "x", entity: "light.a" })).toThrow();
     expect(() => validateConfig({ type: "x", entity: "cover.a", tilt_mode: "soon" as never })).toThrow();
   });
+  it("validates the slat profile", () => {
+    expect(() => validateConfig({ type: "x", entity: "cover.a", slat_profile: "s" as never })).toThrow();
+    expect(() => validateConfig({ type: "x", entity: "cover.a", slat_profile: "z" })).not.toThrow();
+  });
   it("accepts a valid config", () => {
     expect(() => validateConfig({ type: "x", entities: ["cover.a"], service: "script.set_blind" })).not.toThrow();
   });
