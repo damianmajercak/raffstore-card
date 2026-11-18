@@ -17,9 +17,15 @@ export interface HomeAssistant {
   ): Promise<unknown>;
 }
 
+/** Seconds as a number, or the id of an entity whose state is the time in seconds. */
+export type TimeSource = number | string;
+
 export interface EntityConfig {
   entity: string;
   name?: string;
+  open_time?: TimeSource;
+  close_time?: TimeSource;
+  tilt_time?: TimeSource;
 }
 
 export interface PresetConfig {
@@ -57,6 +63,12 @@ export interface RaffstoreCardConfig {
   presets?: PresetConfig[] | false;
   debounce?: number;
   service?: string;
+  /** Full travel time up (seconds or entity id), used only to draw the move smoothly. */
+  open_time?: TimeSource;
+  /** Full travel time down (seconds or entity id). */
+  close_time?: TimeSource;
+  /** Slat turn from one end to the other (seconds or entity id). */
+  tilt_time?: TimeSource;
 }
 
 export interface Target {

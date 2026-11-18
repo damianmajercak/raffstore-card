@@ -1,6 +1,6 @@
 {
   "name": "raffstore-card",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Home Assistant Lovelace card for exterior venetian blinds (raffstore) – set height and slat angle visually in one card.",
   "type": "module",
   "license": "MIT",

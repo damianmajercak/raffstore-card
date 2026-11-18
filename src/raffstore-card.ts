@@ -10,6 +10,7 @@ import {
   renderWindow,
 } from "./drawing";
 import { localize, type StringKey } from "./localize";
+import { MotionTracker, type Pose, type Timing } from "./motion";
 import { cardStyles } from "./styles";
 import type {
   EntityConfig,
@@ -34,6 +35,7 @@ import {
   normalizeEntities,
   positionToLowered,
   presetTarget,
+  resolveSeconds,
   round,
   supports,
   targetReached,
@@ -81,6 +83,9 @@ export class RaffstoreCard extends LitElement {
   private _sentAt = 0;
   private _dialDrag = false;
   private _uid = `${++uidCounter}`;
+  private _motion = new Map<string, MotionTracker>();
+  private _seen = new Map<string, HassEntity>();
+  private _frame?: number;
 
   constructor() {
     super();
@@ -201,12 +206,84 @@ export class RaffstoreCard extends LitElement {
     super.disconnectedCallback();
     window.clearTimeout(this._sendTimer);
     window.clearInterval(this._ticker);
+    if (this._frame) cancelAnimationFrame(this._frame);
     this._sendTimer = undefined;
     this._ticker = undefined;
+    this._frame = undefined;
+  }
+
+  protected willUpdate(changed: PropertyValues): void {
+    if (changed.has("hass")) this._trackMotion();
   }
 
   protected updated(changed: PropertyValues): void {
     if (changed.has("hass")) this._tick();
+    this._scheduleFrame();
+  }
+
+  /* ---------- smooth motion between state updates ---------- */
+
+  private _timing(id: string): Timing | undefined {
+    const cfg = this._config;
+    if (!cfg) return undefined;
+    const ent = this._entities.find((e) => e.entity === id);
+    const open = resolveSeconds(ent?.open_time ?? cfg.open_time, this.hass);
+    const close = resolveSeconds(ent?.close_time ?? cfg.close_time, this.hass);
+    if (!open || !close) return undefined;
+    const tilt = resolveSeconds(ent?.tilt_time ?? cfg.tilt_time, this.hass) ?? 0;
+    return { open, close, tilt };
+  }
+
+  private _motionTarget(id: string): Pose | undefined {
+    return this._target && this._ids().includes(id) ? this._target : undefined;
+  }
+
+  /** Feeds every changed cover state to its tracker (each report corrects the prediction). */
+  private _trackMotion(): void {
+    if (!this.hass) return;
+    const now = performance.now();
+    for (const { entity: id } of this._entities) {
+      const st = this.hass.states[id];
+      if (!st || st === this._seen.get(id)) continue;
+      this._seen.set(id, st);
+      let tr = this._motion.get(id);
+      if (!tr) {
+        tr = new MotionTracker();
+        this._motion.set(id, tr);
+      }
+      tr.report(
+        { position: currentPosition(st), tilt: currentTilt(st) },
+        st.state,
+        now,
+        this._timing(id),
+        supports(st, FEATURE_SET_TILT_POSITION),
+        this._motionTarget(id),
+      );
+    }
+  }
+
+  /** Pose to draw: predicted while moving, the reported one otherwise. */
+  private _shownPose(st: HassEntity): Pose {
+    const reported = { position: currentPosition(st), tilt: currentTilt(st) };
+    const tr = this._motion.get(st.entity_id);
+    if (!tr || isUnavailable(st)) return reported;
+    return tr.pose(
+      performance.now(),
+      this._timing(st.entity_id),
+      supports(st, FEATURE_SET_TILT_POSITION),
+      this._motionTarget(st.entity_id),
+    );
+  }
+
+  private _scheduleFrame(): void {
+    if (this._frame || !this.isConnected) return;
+    const st = this._primary();
+    const tr = st ? this._motion.get(st.entity_id) : undefined;
+    if (!tr || !tr.animating(performance.now())) return;
+    this._frame = requestAnimationFrame(() => {
+      this._frame = undefined;
+      this.requestUpdate();
+    });
   }
 
   /* ---------- helpers ---------- */
@@ -550,8 +627,9 @@ export class RaffstoreCard extends LitElement {
     const hasTilt = supports(st, FEATURE_SET_TILT_POSITION);
     const closed = this._closedAngle;
     const open = this._openAngle;
-    const pos = currentPosition(st);
-    const tilt = currentTilt(st);
+    const shown = this._shownPose(st);
+    const pos = shown.position;
+    const tilt = shown.tilt;
     const target = this._target;
     const lowered = positionToLowered(pos);
     const angle = tiltToAngle(tilt, closed, open);

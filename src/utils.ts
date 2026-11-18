@@ -1,6 +1,8 @@
 import type {
   EntityConfig,
   HassEntity,
+  HomeAssistant,
+  TimeSource,
   PresetConfig,
   RaffstoreCardConfig,
   Target,
@@ -62,6 +64,17 @@ export function validateConfig(config: RaffstoreCardConfig): void {
       if (typeof p?.position !== "number") throw new Error("Each preset needs a position (0–100)");
     }
   }
+  const timeKeys = ["open_time", "close_time", "tilt_time"] as const;
+  for (const src of [config, ...entities]) {
+    for (const k of timeKeys) {
+      const v = (src as unknown as Record<string, unknown>)[k];
+      if (v === undefined) continue;
+      const ok =
+        (typeof v === "number" && v >= 0) ||
+        (typeof v === "string" && (/^[a-z_]+\.[a-z0-9_]+$/.test(v) || Number(v) >= 0));
+      if (!ok) throw new Error(`${k} must be seconds or an entity id`);
+    }
+  }
   if (config.service && !/^[a-z0-9_]+\.[a-z0-9_]+$/.test(config.service)) {
     throw new Error("service must look like domain.service");
   }
@@ -105,4 +118,14 @@ export function targetReached(entity: HassEntity | undefined, target: Target): b
   if (!posOk) return false;
   if (target.position >= 100 || !supports(entity, FEATURE_SET_TILT_POSITION)) return true;
   return Math.abs(currentTilt(entity) - target.tilt) <= 2;
+}
+
+/** Seconds from a number or from an entity state; undefined when unknown. */
+export function resolveSeconds(src: TimeSource | undefined, hass: HomeAssistant | undefined): number | undefined {
+  if (src === undefined || src === null) return undefined;
+  if (typeof src === "number") return src >= 0 ? src : undefined;
+  const asNum = Number(src);
+  if (src.trim() !== "" && Number.isFinite(asNum)) return asNum >= 0 ? asNum : undefined;
+  const v = parseFloat(hass?.states[src]?.state ?? "");
+  return Number.isFinite(v) && v >= 0 ? v : undefined;
 }

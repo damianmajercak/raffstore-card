@@ -69,7 +69,7 @@ presets:
 
 | Option | Default | Description |
 |---|---|---|
-| `entity` / `entities` | – | One or more `cover` entities. `entities` items can be a string or `{entity, name}`. |
+| `entity` / `entities` | – | One or more `cover` entities. `entities` items can be a string or `{entity, name, open_time, close_time, tilt_time}`. |
 | `name` | friendly name | Card title. |
 | `lock_entity` | – | `switch` / `input_boolean`; `on` = automation paused. A manual move turns it on, the pill toggles it. |
 | `tilt_mode` | `after_move` | When the slat angle is sent, see below. |
@@ -79,6 +79,9 @@ presets:
 | `presets` | built-in | List of `{name, position, angle \| tilt, icon}`; `position` and `tilt` use Home Assistant percent (position 100 = raised, tilt 100 = open). `false` hides presets. |
 | `debounce` | `800` | Milliseconds after dragging before the command is sent. |
 | `service` | – | Optional `domain.service` called instead of the cover services with `entity_id`, `position` and `tilt_position` (e.g. a script). |
+| `open_time` | – | Full travel time up in seconds, or an entity whose state is that time. Only used to draw the move smoothly, see below. |
+| `close_time` | – | Full travel time down (seconds or entity). |
+| `tilt_time` | `0` | Slat turn from one end to the other (seconds or entity). |
 
 ### `tilt_mode`
 
@@ -88,6 +91,24 @@ Home Assistant has no single "move to height *and* angle" command – position a
 - **`immediate`**: both commands are sent right away. Use this when the device queues a tilt that arrives during a move and applies it after the move (recommended for devices you control yourself, e.g. ESPHome).
 
 When the height changes, the card keeps the angle you see: after lowering, the slats are turned back to the shown angle.
+
+### Smooth movement
+
+Time-based covers report their position only about once per second while moving, so the drawing would jump in steps. The card predicts the move between reports and treats every report as a correction that is blended in.
+
+- With `open_time` and `close_time` the card follows the venetian blind model: the slats turn first (`tilt_time`), then the height changes for the rest of the travel time – the same model as ESPHome [`venetian_blinds`](https://github.com/bruxy70/Venetian-Blinds-Control).
+- Without them the speed is estimated from the last two reports.
+- The prediction never runs more than 1.25 s past the last report and stops at a target set in the card. After the cover stops, the card shows exactly the reported pose.
+
+Keep the times in one place: let the device expose them as entities and point the card at them.
+
+```yaml
+type: custom:raffstore-card
+entity: cover.living_room_blind
+open_time: sensor.living_room_blind_open_time    # 48
+close_time: sensor.living_room_blind_close_time  # 45
+tilt_time: sensor.living_room_blind_tilt_time    # 2.4
+```
 
 ### Theming
 
